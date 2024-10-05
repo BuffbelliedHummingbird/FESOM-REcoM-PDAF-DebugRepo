@@ -21,10 +21,11 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
     use g_comm
     use g_support
 
+
     implicit none
     type(t_mesh), intent(in) , target                       :: mesh
     integer, intent(in)                                     :: Nn                   !< Total number of nodes in the vertical
-    real(kind=8),dimension(mesh%nl-1,bgc_num),intent(inout) :: state                !< ChlA conc in phytoplankton [mg/m3]
+    real(kind=8),dimension(mesh%nl-1,bgc_num),intent(inout) :: state                !< Local tracer array
 									  	    !! should be in instead of inout
 
     real(kind=8),dimension(mesh%nl-1)                       :: thick                !< [m] Vertical distance between two nodes = Thickness 
@@ -468,22 +469,18 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
 !< pzDet: Maximum small detritus prefence by first zooplankton
 !< pzDetZ2: Maximum large detritus preference by first zooplankton
                 aux         = pzPhy*PhyN + pzDia*DiaN + PzDet*DetN + pzDetZ2*DetZ2N
-                varpzPhy    = pzPhy   * PhyN /aux
-                varpzDia    = pzDia   * DiaN /aux
-                varpzDet    = pzDet   * DetN /aux
-                varpzDetZ2  = pzDetZ2 * DetN /aux
+                varpzPhy    = pzPhy   * PhyN   /aux
+                varpzDia    = pzDia   * DiaN   /aux
+                varpzDet    = pzDet   * DetN   /aux
+                varpzDetZ2  = pzDetZ2 * DetZ2N /aux
             else
                 DiaNsq      = DiaN**2
                 PhyNsq      = PhyN**2
                 DetNsq      = DetN**2
                 DetZ2Nsq    = DetZ2N**2
-!                PhyNsq      = PhyN * PhyN
                 varpzPhy    = pzPhy * PhyNsq /(sPhyNsq + PhyNsq)
-!                DiaNsq      = DiaN * DiaN
                 varpzDia    = pzDia * DiaNsq /(sDiaNsq + DiaNsq)
-!                DetNsq      = DetN * DetN
                 varpzDet    = pzDet * DetNsq /(sDetNsq + DetNsq)
-!                DetZ2Nsq    = DetZ2N * DetZ2N
                 varpzDetZ2  = pzDetZ2 * DetZ2Nsq /(sDetZ2Nsq + DetZ2Nsq)
 
             endif
@@ -666,8 +663,6 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
 ! Second zooplankton respiration is assumed to drive zooplankton back to Redfield C:N
 ! if their C:N becomes higher than Redfield
        call krill_resp(n,mesh)
-   !print*,'daynew: ', daynew
-   !print*,'Latr ', Latr 
        if((grazingFluxcarbonzoo2/Zoo2C) <= 0.1)then
           res_zoo2_f = 0.1*(grazingFluxcarbonzoo2/Zoo2C*100)
        else
@@ -736,13 +731,17 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
         calc_loss_gra_14 = grazingFlux_phy *              &
             recipQuota_14/(PhyC_14 + tiny)   * PhyCalc_14
     end if
-		
+
 !-------------------------------------------------------------------------------
-! Sources minus sinks are calculated
+!-------------------------------------------------------------------------------
+!   SMS: Sources minus sinks are calculated   ----------------------------------
+!-------------------------------------------------------------------------------
 !-------------------------------------------------------------------------------
 
 !____________________________________________________________
-!< DIN 
+! ***************
+! ***   DIN   ***
+! ***************
 
 !< DON:            Extracellular dissolved organic nitrogen [mmolN m-3]
 !< rho_N*arrFunc : Remineralization rate, temperature dependency is calculated with arrFunc [day^-1]
@@ -758,28 +757,29 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
         - N_assim                      * PhyC    &  ! --> N assimilation Nanophytoplankton, [mmol N/(mmol C * day)] C specific N utilization rate
         - N_assim_Dia                  * DiaC    &  ! --> N assimilation Diatoms
         + rho_N * arrFunc              * DON     &  ! --> DON remineralization, temperature dependent [day^-1 * mmol/m3]       
-!        + LocRiverDIN                            & ! --> added in FESOM2 
                                              ) * dt_b + sms(k,idin)  
 
 !____________________________________________________________
-!< DIC
+! ***************
+! ***   DIC   ***
+! ***************
 
 !< rho_C1: Temperature dependent C degradation of extracellular organic C (EOC) [day^-1]
 
     if(REcoM_Second_Zoo)  then
         sms(k,idic)      = (                             &
-            - Cphot                         * PhyC       & ! --> Small pyhtoplankton photosynthesis 
-            + phyRespRate                   * PhyC       & ! --> Small pyhtoplankton respiration 
-            - Cphot_Dia                     * DiaC       & ! --> Diatom photosynthesis 
-            + phyRespRate_Dia               * DiaC       & ! --> Diatom respiration
-            + rho_C1 * arrFunc              * EOC        & ! --> Remineralization of DOC
-            + HetRespFlux                                & ! --> Zooplankton respiration                     
-            + Zoo2RespFlux                               &                    
-            + calc_diss                     * DetCalc    & ! --> Calcite dissolution from detritus 
-            + calc_loss_gra  * calc_diss_guts            &
-            + calc_loss_gra2 * calc_diss_guts            &
-            + calc_diss2                     * DetZ2Calc & 
-            - calcification                              & ! --> Calcification
+            - Cphot                         * PhyC       & ! --> Small pyhtoplankton photosynthesis [DIC   --> PhyC ]
+            + phyRespRate                   * PhyC       & ! --> Small pyhtoplankton respiration    [PhyC  --> DIC  ]
+            - Cphot_Dia                     * DiaC       & ! --> Diatom photosynthesis              [DIC   --> DiaC ]
+            + phyRespRate_Dia               * DiaC       & ! --> Diatom respiration                 [DiaC  --> DIC  ]
+            + rho_C1 * arrFunc              * EOC        & ! --> Remineralization of DOC            [DOC   --> DIC  ]
+            + HetRespFlux                                & ! --> Zooplankton respiration            [HetC  --> DIC  ]
+            + Zoo2RespFlux                               & !                                        [Zo2C  --> DIC  ]                
+            + calc_diss                     * DetCalc    & ! --> Calcite dissolution from detritus  [Det  Calc   --> DIC  ]
+            + calc_diss2                     * DetZ2Calc & !                                        [Det2 Calc   --> DIC  ]
+            + calc_loss_gra  * calc_diss_guts            & ! --> indigestible and dissolves         [PhyCalc   --> DIC  ] 
+            + calc_loss_gra2 * calc_diss_guts            & ! --> indigestible and dissolves         [PhyCalc   --> DIC  ]
+            - calcification                              & ! --> Calcification                      [DIC  --> PhyCalc ]
                                                         ) * dt_b + sms(k,idic)
     else
         sms(k,idic)      = (                       &
@@ -813,19 +813,22 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
 !    endif
 
 !____________________________________________________________
+! ***************
+! ***   Alk   ***
+! ***************
 !< Alkalinity (Assumes that N:P follows a constant Redfield ratio
 
 !< N_assimC: 1.0625 = 1/16 + 1
     if (REcoM_Second_Zoo) then
         sms(k,ialk)      = (                       &
-            + 1.0625 * N_assim             * PhyC    &
-            + 1.0625 * N_assim_Dia         * DiaC    &
-            - 1.0625 * rho_N * arrFunc     * DON     &     
-            + 2.d0 * calc_diss             * DetCalc &
-            + 2.d0 * calc_loss_gra * calc_diss_guts  &
-            + 2.d0 * calc_loss_gra2 * calc_diss_guts &
-            + 2.d0 * calc_diss2            * DetZ2Calc &
-            - 2.d0 * calcification                   &                      
+            + 1.0625 * N_assim             * PhyC    &     ! nitrogen assimilition by Phy
+            + 1.0625 * N_assim_Dia         * DiaC    &     ! nitrogen assimilation by Dia
+            - 1.0625 * rho_N * arrFunc     * DON     &     ! remineralization of DON
+            + 2.d0 * calc_diss             * DetCalc &     ! dissolution of sinking det
+            + 2.d0 * calc_loss_gra * calc_diss_guts  &     ! dissolution of det in guts
+            + 2.d0 * calc_loss_gra2 * calc_diss_guts &     ! dissolution of detZo2 in guts 
+            + 2.d0 * calc_diss2            * DetZ2Calc &   ! dissolution of sinking detZo2
+            - 2.d0 * calcification                   &     ! calcification by PhyC    
                                              ) * dt_b + sms(k,ialk)
     else
         sms(k,ialk)      = (                       &
@@ -838,7 +841,9 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
                                              ) * dt_b + sms(k,ialk) 
     endif
 !____________________________________________________________
-!< Small phytoplankton
+! ****************
+! ***   PhyN   ***
+! ****************
  
 !< lossN:  Phytoplankton loss of organic N compounds [day^-1]
     if (REcoM_Second_Zoo) then
@@ -858,7 +863,9 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
                                                    ) * dt_b + sms(k,iphyn)
    endif
 !____________________________________________________________
-!< Small phytoplankton C
+! ****************
+! ***   PhyC   ***
+! ****************
 
 !< lossC: Phytoplankton loss of carbon [day^-1]
 !< When N : C ratio becomes too high, excretion of DOC is downregulated
@@ -867,12 +874,12 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
 
     if (REcoM_Second_Zoo) then
         sms(k,iphyc)      = (                        &
-            + Cphot                        * PhyC    & ! -- Photosynthesis ---->/
-            - lossC * limitFacN            * PhyC    & ! -- Excretion of DOC   / Net photosynthesis
-            - phyRespRate                  * PhyC    & ! -- Respiration ----->/
-            - aggregationRate              * PhyC    & ! -- Aggregation loss
-            - grazingFlux_phy * recipQuota           & ! -- Grazing loss
-            - grazingFlux_phy2 * recipQuota          &
+            + Cphot                        * PhyC    & ! -- Photosynthesis      [ DIC  --> PhyC  ]
+            - lossC * limitFacN            * PhyC    & ! -- Excretion of DOC    [ PhyC --> DOC   ]
+            - phyRespRate                  * PhyC    & ! -- Respiration         [ PhyC --> DIC   ]
+            - aggregationRate              * PhyC    & ! -- Aggregation loss    [ PhyC --> Det C ]
+            - grazingFlux_phy * recipQuota           & ! -- Grazing loss        [ PhyC --> HetC + Det  C ]
+            - grazingFlux_phy2 * recipQuota          & !                        [ PhyC --> Zo2C + Det2 C ]
                                                    ) * dt_b + sms(k,iphyc)
     else
         sms(k,iphyc)      = (                        &
@@ -884,6 +891,10 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
                                                    ) * dt_b + sms(k,iphyc)
    endif
 !____________________________________________________________
+! ******************
+! ***   PhyChl   ***
+! ******************
+
 ! Phytoplankton ChlA
 
 !< Chl2N: Conversion factor from mmolN to mgChla 
@@ -906,7 +917,10 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
                                                    ) * dt_b + sms(k,ipchl)
     endif
 !-------------------------------------------------------------------------------
-! Detritus N
+! ****************
+! ***   DetN   ***
+! ****************
+
    if (Grazing_detritus) then
     sms(k,idetn)       = (                       &
 	+ grazingFlux_phy                        &
@@ -914,7 +928,7 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
         + grazingFlux_dia                        &
         - grazingFlux_dia * grazEff              &
         - grazingFlux_Det * grazEff              & !!!Sloppy feeding is  thought because of grazing flux multiplied with grazeff 
-        - grazingFlux_Det2 * grazEff             &
+        - grazingFlux_Det2 * grazEff2            &
         + aggregationRate              * PhyN    &
         + aggregationRate              * DiaN    &
         + hetLossFlux                            &
@@ -932,19 +946,22 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
                                                ) * dt_b + sms(k,idetn)
    end if   
 !-------------------------------------------------------------------------------
-! Detritus C
+! ****************
+! ***   DetC   ***
+! ****************
+
    if (Grazing_detritus) then
-    sms(k,idetc)       = (                            &
-        + grazingFlux_phy * recipQuota                 &
-        - grazingFlux_phy * recipQuota * grazEff       &
-        + grazingFlux_Dia * recipQuota_Dia             &
-        - grazingFlux_Dia * recipQuota_Dia * grazEff   &
-        - grazingFlux_Det * recipDet * grazEff         &
-        - grazingFlux_Det2 * recipDet2 * grazEff       &     
-        + aggregationRate              * phyC          &
-        + aggregationRate              * DiaC          &
-        + hetLossFlux * recipQZoo                      &
-        - reminC * arrFunc             * DetC          &
+    sms(k,idetc)       = (                             &
+        + grazingFlux_phy * recipQuota                 &  ! 
+        - grazingFlux_phy * recipQuota * grazEff       &  ! [ PhyC --> DetC ]     Sloppy feeding by Het on Phy
+        + grazingFlux_Dia * recipQuota_Dia             &  ! 
+        - grazingFlux_Dia * recipQuota_Dia * grazEff   &  ! [ DiaC --> DetC ]     Sloppy feeding by Het on Dia
+        - grazingFlux_Det * recipDet * grazEff         &  ! [ DetC --> HetC ]     Grazing on detritus
+        - grazingFlux_Det2 * recipDet * grazEff2       &  ! [ DetC --> Zo2C ]     Grazing on detritus
+        + aggregationRate              * phyC          &  ! [ PhyC --> DetC ]
+        + aggregationRate              * DiaC          &  ! [ DiaC --> DetC ]
+        + hetLossFlux * recipQZoo                      &  ! [ HetC --> DetC ]     Mortality
+        - reminC * arrFunc             * DetC          &  ! [ DetC --> DOC  ]
                                              )   * dt_b + sms(k,idetc)
    else
     sms(k,idetc)       = (                             &
@@ -959,7 +976,10 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
                                              )   * dt_b + sms(k,idetc)
    end if
 !____________________________________________________________
-!< Heterotrophic N
+! ****************
+! ***   HetN   ***
+! ****************
+
     if (REcoM_Second_Zoo) then
         sms(k,ihetn)       = (                       &
     	    + grazingFlux * grazEff                  & ! -- Grazig on phytoplankton
@@ -975,19 +995,21 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
                                                    ) * dt_b + sms(k,ihetn)
     endif   
 !____________________________________________________________
-!< Heterotrophic C
+! ****************
+! ***   HetC   ***
+! ****************
 
     if (REcoM_Second_Zoo) then
         if (Grazing_detritus) then
             sms(k,ihetc)      = (                            &
-     	        + grazingFlux_phy * recipQuota * grazEff     & ! -- Grazing on small phytoplankton
-     	        + grazingFlux_Dia * recipQuota_Dia * grazEff & ! -- Grazing on diatom
-                + grazingFlux_Det * recipDet * grazEff       & ! -- Grazing on detritus
-                + grazingFlux_DetZ2 * recipDet2 * grazEff    &
-     	        - hetLossFlux * recipQZoo                    & ! -- Mortality loss
-                - grazingFlux_het2 * recipQZoo               &
-     	        - lossC_z                      * HetC        & ! -- Excretion loss
-      	        - hetRespFlux                                & ! -- REspiration loss
+     	        + grazingFlux_phy * recipQuota * grazEff     & ! -- Grazing on small phytoplankton [ PhyC  --> HetC ]
+     	        + grazingFlux_Dia * recipQuota_Dia * grazEff & ! -- Grazing on diatom              [ DiaC  --> HetC ]
+                + grazingFlux_Det * recipDet * grazEff       & ! -- Grazing on detritus            [ Det  C  --> HetC ]
+                + grazingFlux_DetZ2 * recipDet2 * grazEff    & !                                   [ Det2 C  --> HetC ]
+     	        - hetLossFlux * recipQZoo                    & ! -- Mortality loss                 [ HetC    --> DetC ]
+                - grazingFlux_het2 * recipQZoo               & !                                   [ HetC    --> Zo2C + Det2 C ]
+     	        - lossC_z                      * HetC        & ! -- Excretion loss                 [ HetC    --> DOC  ]
+      	        - hetRespFlux                                & ! -- REspiration loss               [ HetC    --> DIC  ]
                                                         ) * dt_b + sms(k,ihetc)
         else
             sms(k,ihetc)      = (                            &
@@ -1009,6 +1031,10 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
                                                         ) * dt_b + sms(k,ihetc)
     endif
 !____________________________________________________________
+! ****************
+! ***   Zo2N   ***
+! ****************
+
    if (REcoM_Second_Zoo) then
  ! Second Zooplankton N                                                                                              
      sms(k,izoo2n)       = (                        &
@@ -1017,21 +1043,23 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
          - lossN_z2                      * Zoo2N    &
          - Zoo2fecalloss_n                            & 
                                                ) * dt_b + sms(k,izoo2n)
- !-------------------------------------------------------------------------------                       
-  ! Second Zooplankton C                                                                                 
+!-------------------------------------------------------------------------------                       
+! ****************
+! ***   Zo2C   ***
+! ****************                                                                                
                   
      if (Grazing_detritus) then
              
      sms(k,izoo2c)      = (                             &
-         + grazingFlux_phy2 * recipQuota * grazEff2     &
-         + grazingFlux_Dia2 * recipQuota_Dia * grazEff2 &
-         + grazingFlux_het2 * recipQZoo * grazEff2      &
-         + grazingFlux_Det2 * recipDet * grazEff2       &
-         + grazingFlux_DetZ22 * recipDet2 * grazEff2    &
-         - zoo2LossFlux * recipQZoo2                    &
-         - lossC_z2                      * Zoo2C        &
-         - Zoo2RespFlux                                 &
-         - Zoo2fecalloss_c                              &
+         + grazingFlux_phy2 * recipQuota * grazEff2     & ! [ PhyC   --> Zo2C  ]
+         + grazingFlux_Dia2 * recipQuota_Dia * grazEff2 & ! [ DiaC   --> Zo2C  ]
+         + grazingFlux_het2 * recipQZoo * grazEff2      & ! [ HetC   --> Zo2C  ]
+         + grazingFlux_Det2 * recipDet * grazEff2       & ! [ Det  C --> Zo2C  ]
+         + grazingFlux_DetZ22 * recipDet2 * grazEff2    & ! [ Det2 C --> Zo2C  ]
+         - zoo2LossFlux * recipQZoo2                    & ! [ Zo2C --> Det2 C ]
+         - lossC_z2                      * Zoo2C        & ! [ Zo2C --> DOC    ]
+         - Zoo2RespFlux                                 & ! [ Zo2C --> DIC    ]
+         - Zoo2fecalloss_c                              & ! [ Zo2C --> Det2 C ]
                                                 ) * dt_b + sms(k,izoo2c)  
      else
       sms(k,izoo2c)      = (                             &
@@ -1045,7 +1073,10 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
                                                 ) * dt_b + sms(k,izoo2c)
      end if   
 !---------------------------------------------------------------------------------
-  ! Second Zooplankton Detritus N
+! *********************
+! ***   Det Zo2 N   ***
+! *********************
+
      if (Grazing_detritus) then
       sms(k,idetz2n)       = (                       &
          + grazingFlux_phy2                       &
@@ -1054,7 +1085,7 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
          - grazingFlux_dia2 * grazEff2            & 
          + grazingFlux_het2                       &
          - grazingFlux_het2 * grazEff2            &
-         - grazingFlux_DetZ2 * grazEff2           &
+         - grazingFlux_DetZ2 * grazEff            &
          - grazingFlux_DetZ22 * grazEff2          &   
          + Zoo2LossFlux                           &
          + Zoo2fecalloss_n                          &
@@ -1071,22 +1102,24 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
          - reminN * arrFunc             * DetZ2N  &
                                                ) * dt_b + sms(k,idetz2n)
      end if
- !---------------------------------------------------------------------------------                                                                                            
-                                                           
-  ! Second Zooplankton Detritus C
+!---------------------------------------------------------------------------------
+! *********************
+! ***   Det Zo2 C   ***
+! *********************
+
      if (Grazing_detritus) then
       sms(k,idetz2c)       = (                             &
-        + grazingFlux_phy2 * recipQuota                &
-        - grazingFlux_phy2 * recipQuota * grazEff2     &
-        + grazingFlux_Dia2 * recipQuota_Dia            &
-        - grazingFlux_Dia2 * recipQuota_Dia * grazEff2 &
-        + grazingFlux_het2 * recipQZoo                 &
-        - grazingFlux_het2 * recipQZoo * grazEff2      &
-        - grazingFlux_DetZ2 * recipDet * grazEff2      &
-        - grazingFlux_DetZ22 * recipDet2 * grazEff2    &
-        + Zoo2LossFlux * recipQZoo2                    &
-        + Zoo2fecalloss_c                   & 
-        - reminC * arrFunc             * DetZ2C          &
+        + grazingFlux_phy2 * recipQuota                &       !
+        - grazingFlux_phy2 * recipQuota * grazEff2     &       ! [PhyC  --> Det2 C]  Sloppy feeding by Zo2
+        + grazingFlux_Dia2 * recipQuota_Dia            &       !
+        - grazingFlux_Dia2 * recipQuota_Dia * grazEff2 &       ! [DiaC  --> Det2 C]
+        + grazingFlux_het2 * recipQZoo                 &       !
+        - grazingFlux_het2 * recipQZoo * grazEff2      &       ! [HetC  --> Det2 C]
+        - grazingFlux_DetZ2 * recipDet2 * grazEff      &       ! [Det2 C --> HetC ] Grazing on detritus
+        - grazingFlux_DetZ22 * recipDet2 * grazEff2    &       ! [Det2 C --> Zo2C ]
+        + Zoo2LossFlux * recipQZoo2                    &       ! [Zo2C --> Det2 C]
+        + Zoo2fecalloss_c                              &       ! [Zo2C --> Det2 C]
+        - reminC * arrFunc             * DetZ2C        &       ! [Det2 C --> DOC ]
                                              )   * dt_b + sms(k,idetz2c)
      else
       sms(k,idetz2c)       = (                             &
@@ -1102,22 +1135,32 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
                                              )   * dt_b + sms(k,idetz2c)
      end if
 
- !-------------------------------------------------------------------------------------
-  !Second Zooplankton  Detritus Si                                                                                                                                                                                                      
+!-------------------------------------------------------------------------------------
+! *********************
+! ***   Det Zo2 Si  ***
+! *********************                                                                                                                                                                                                      
+
      sms(k,idetz2si)     = (                          &
          + grazingFlux_dia2 * qSiN                    &  ! --> qSin convert N to Si
          - reminSiT                        * DetZ2Si  &
                                              ) * dt_b + sms(k,idetz2si)
- !-------------------------------------------------------------------------------                                                                                              
- ! Detritus calcite   
+!-------------------------------------------------------------------------------                                                                                              
+! ************************
+! ***   Det Zo2 Calc   ***
+! ************************  
+
      sms(k,idetz2calc)   = (               &
-       + calc_loss_gra2                  &
-       - calc_loss_gra2 * calc_diss_guts &
-       - calc_diss2     * DetZ2Calc       &
+       + calc_loss_gra2                    &  ! \
+       - calc_loss_gra2 * calc_diss_guts   &  !  \ [PhyCalc --> Det2 Calc]  Indigestible and excreted
+       - calc_diss2     * DetZ2Calc        &  ! [Det2 Calc --> DIC ]        Calcite dissolution
                                            ) * dt_b + sms(k,idetz2calc)
    endif                                                                               
 !-------------------------------------------------------------------------------
-! DON (Extracellular organic N)
+! ***************
+! ***   DON   ***
+! ***************
+! Extracellular organic N
+
    if (REcoM_Second_Zoo) then
     sms(k,idon)      = (                        &
       + lossN * limitFacN              * phyN   &
@@ -1127,7 +1170,6 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
       + lossN_z                        * HetN   &
       + lossN_z2                       * Zoo2N  &
       - rho_N * arrFunc                * DON    &
-!      + LocRiverDON                             &
                                              ) * dt_b + sms(k,idon)
    else
 
@@ -1137,21 +1179,22 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
       + reminN * arrFunc               * DetN   &
       + lossN_z                        * HetN   &
       - rho_N * arrFunc                * DON    &
-!      + LocRiverDON                             &
                                               ) * dt_b + sms(k,idon)
    endif
 !-------------------------------------------------------------------------------
-! EOC
+! ***************
+! ***   DOC   ***
+! ***************
+
    if (REcoM_Second_Zoo) then
     sms(k,idoc)       = (                       &
-      + lossC * limitFacN              * phyC   &
-      + lossC_d * limitFacN_dia        * DiaC   &
-      + reminC * arrFunc               * DetC   &
-      + reminC * arrFunc               * DetZ2C &
-      + lossC_z                        * HetC   &
-      + lossC_z2                       * Zoo2C  &
-      - rho_c1 * arrFunc               * EOC    &
-!      + LocRiverDOC                             &
+      + lossC * limitFacN              * phyC   &  ! [ PhyC  --> DOC ]   excretion
+      + lossC_d * limitFacN_dia        * DiaC   &  ! [ DiaC  --> DOC ]
+      + lossC_z                        * HetC   &  ! [ HetC --> DOC ]
+      + lossC_z2                       * Zoo2C  &  ! [ Zo2C --> DOC ]
+      + reminC * arrFunc               * DetC   &  ! [ Det  C  --> DOC ] remineralization
+      + reminC * arrFunc               * DetZ2C &  ! [ Det2 C  --> DOC ]
+      - rho_c1 * arrFunc               * EOC    &  ! [ DOC --> DIC ]
                                               ) * dt_b + sms(k,idoc)	
    else 
     sms(k,idoc)       = (                       &
@@ -1160,11 +1203,12 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
       + reminC * arrFunc               * DetC   &
       + lossC_z                        * HetC   &
       - rho_c1 * arrFunc               * EOC    &
-!      + LocRiverDOC                             &
                                               ) * dt_b + sms(k,idoc)
    endif 		
 !____________________________________________________________
-!< Diatom N
+! ****************
+! ***   DiaN   ***
+! ****************
  
 !< lossN:  Diatom loss of organic N compounds [day^-1]
 !< When N : C ratio becomes too high, excretion of DON is downregulated
@@ -1187,7 +1231,9 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
                                                  ) * dt_b + sms(k,idian)
     endif 		
 !____________________________________________________________
-!< Diatom C
+! ****************
+! ***   DiaC   ***
+! ****************
 
 !< lossC_d: Diatom loss of carbon [day^-1]
 !< When N : C ratio becomes too high, excretion of DOC is downregulated
@@ -1195,12 +1241,12 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
 !< aggregationRate transfers C to the detritus pool
     if (REcoM_Second_Zoo) then
         sms(k,idiac)      = (                      &
-            + Cphot_dia                      * DiaC  & ! -- Photosynthesis ---->/
-            - lossC_d * limitFacN_dia        * DiaC  & ! -- Excretion of DOC --/ Net Photosynthesis
-            - phyRespRate_dia                * DiaC  & ! -- Respiration ----->/
-            - aggregationRate                * DiaC  &
-            - grazingFlux_dia * recipQuota_dia       &
-            - grazingFlux_dia2 * recipQuota_dia      &
+            + Cphot_dia                      * DiaC  & ! [ DIC  --> DiaC ]  -- Photosynthesis ---->/
+            - lossC_d * limitFacN_dia        * DiaC  & ! [ DiaC --> DOC  ]  -- Excretion of DOC --/ Net Photosynthesis
+            - phyRespRate_dia                * DiaC  & ! [ DiaC --> DIC  ]  -- Respiration ----->/
+            - aggregationRate                * DiaC  & ! [ DiaC --> Det C ]
+            - grazingFlux_dia * recipQuota_dia       & ! [ DiaC --> HetC + DetC  ]
+            - grazingFlux_dia2 * recipQuota_dia      & ! [ DiaC --> Zo2C + Det2 C]
      	                                           ) * dt_b + sms(k,idiac)
     else
         sms(k,idiac)      = (                      &
@@ -1212,7 +1258,9 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
      	                                           ) * dt_b + sms(k,idiac)
     endif
 !____________________________________________________________
-!< Diatom Chl
+! ******************
+! ***   DiaChl   ***
+! ******************
 
     if (REcoM_Second_Zoo) then
         sms(k,idchl)      = (                         &
@@ -1231,7 +1279,10 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
                                                    ) * dt_b + sms(k,idchl)
     endif 
 !____________________________________________________________
-!< Diatom Si
+! *****************
+! ***   DiaSi   ***
+! *****************
+
 !< lossN_d: Diatom loss of organic nitrogen compunds [day^-1]
 !< When N : C ratio becomes too high, excretion is downregulated
 !< by the limiter function limitFacN_dia
@@ -1254,7 +1305,10 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
                                                    ) * dt_b + sms(k,idiasi)
     endif 
 !-------------------------------------------------------------------------------
-! Detritus Si
+! ******************
+! ***   Det Si   ***
+! ******************
+
    if (REcoM_Second_Zoo) then
     sms(k,idetsi)     = (                       &
       + aggregationRate                 * DiaSi &
@@ -1272,7 +1326,10 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
                                              ) * dt_b + sms(k,idetsi)
    endif
 !____________________________________________________________
-!< DSi, Silicate 
+! ***************
+! ***   DSi   ***
+! ***************
+! Dissolved Silicate
 
 !    if (mype==0) print*,' sms(k,idin) ', sms(k,idin)
 
@@ -1300,7 +1357,9 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
    endif
 
 !____________________________________________________________
-!< Fe
+! *********************
+! ***   Fe (iron)   ***
+! *********************
 
 !< Fe2C: Intracellular Fe : C ratio [μmol Fe mmol C^-1]
 !< Fe2N: Intracellular Fe : N ratio [μmol Fe mmol N^-1] Fe2N = Fe2C * 6.625
@@ -1384,17 +1443,19 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
     end if
    endif
 !____________________________________________________________
-!< Small phytoplankton calcite
+! *********************
+! ***   PhyCalc     ***
+! *********************
 
 !#ifdef REcoM_calcification
     if (REcoM_Second_Zoo) then
         sms(k,iphycal)    = (             &
-            + calcification               & ! -- Calcification
-            - lossC * limitFacN * phyCalc & ! -- Excretion loss
-            - phyRespRate       * phyCalc & ! -- Respiration
-            - calc_loss_agg               & ! -- Aggregation loss
-            - calc_loss_gra               & ! -- Grazing loss
-            - calc_loss_gra2              &
+            + calcification               & ! -- Calcification       [ DIC --> PhyCalc ]
+            - lossC * limitFacN * phyCalc & ! -- Excretion loss      [ PhyCalc --> Det Calc ]
+            - phyRespRate       * phyCalc & ! -- Respiration         [ PhyCalc --> Det Calc ]
+            - calc_loss_agg               & ! -- Aggregation loss    [ PhyCalc --> Det  Calc ]
+            - calc_loss_gra               & ! -- Grazing loss        [ PhyCalc --> Det  Calc + DIC ]      
+            - calc_loss_gra2              & !                        [ PhyCalc --> Det2 Calc + DIC ]
                                                   ) * dt_b + sms(k,iphycal)
     else
         sms(k,iphycal)    = (             &
@@ -1407,18 +1468,23 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
     endif
 
 !-------------------------------------------------------------------------------
-! Detritus calcite
+! *********************
+! ***   Det Calc    ***
+! *********************
+
     sms(k,idetcal)   = (               &
-      + lossC * limitFacN * phyCalc    &
-      + phyRespRate       * phyCalc    &
-      + calc_loss_agg                  &
-      + calc_loss_gra                  &
-      - calc_loss_gra * calc_diss_guts &
-      - calc_diss     * DetCalc        &
+      + lossC * limitFacN * phyCalc    & ! [ PhyCalc --> Det Calc ]
+      + phyRespRate       * phyCalc    & ! [ PhyCalc --> Det Calc ]
+      + calc_loss_agg                  & ! [ PhyCalc --> Det Calc ]
+      + calc_loss_gra                  & ! \
+      - calc_loss_gra * calc_diss_guts & !  \ [ PhyCalc --> Det Calc ]  Indigestible and excreted
+      - calc_diss     * DetCalc        & ! [ Det Calc --> DIC ]
                                            ) * dt_b + sms(k,idetcal)
-!#endif
 !-------------------------------------------------------------------------------
-! Oxygen
+! ******************
+! ***   Oxygen   ***
+! ******************
+
    if (REcoM_Second_Zoo) then
     sms(k,ioxy)   = (               &
       + Cphot              * phyC  &
@@ -1440,8 +1506,9 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
                                       )*redO2C * dt_b + sms(k,ioxy)
    endif
 
-!
-!   
+! **********************
+! ***   C isotopes   ***
+! **********************
     if (ciso) then
 !-------------------------------------------------------------------------------
 ! DIC_13
@@ -1653,6 +1720,7 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
         Diags3Dloc(k,8) = Diags3Dloc(k,8) + (   &
         + KOchl_dia  &
         ) * recipbiostep
+        
 
   end do ! Main vertikal loop ends
 
