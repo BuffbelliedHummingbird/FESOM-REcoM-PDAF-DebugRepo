@@ -4,6 +4,7 @@ module io_MEANDATA
   use, intrinsic :: iso_fortran_env, only: real64, real32
   use io_data_strategy_module
   use async_threads_module
+  use g_events
 
   implicit none
 #include "netcdf.inc"

@@ -20,6 +20,7 @@ module recom_diag
   use REcoM_GloVar
   use io_mesh_info
   use recom_config
+  use g_events
 
   implicit none
 #include "netcdf.inc"

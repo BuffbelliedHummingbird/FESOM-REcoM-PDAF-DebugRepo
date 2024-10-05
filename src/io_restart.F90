@@ -12,6 +12,7 @@ MODULE io_RESTART
   use REcoM_GloVar
   use recom_config
   use REcoM_ciso
+  use g_events
 #endif
 #ifdef use_PDAF
   use mod_atmos_ens_stochasticity, only: write_atmos_stochasticity_restart, atmos_stochasticity_ON
@@ -322,7 +323,7 @@ if(mype==0)  write(*,*) 'REcoM_restart= ',REcoM_restart
   if (restart_length_unit.eq.'y') then
      call annual_event(is_restart)
   else if (restart_length_unit.eq.'m') then 
-     call monthly_event(is_restart) 
+     call monthly_event(is_restart, restart_length)  
   else if (restart_length_unit.eq.'d') then
      call daily_event(is_restart, restart_length)
   else if (restart_length_unit.eq.'h') then
