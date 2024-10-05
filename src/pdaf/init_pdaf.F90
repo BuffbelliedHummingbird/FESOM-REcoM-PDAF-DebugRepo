@@ -31,7 +31,7 @@ SUBROUTINE init_pdaf()
        forget, locweight, local_range, srange, &
        type_trans, type_sqrt, eff_dim_obs, loc_radius, loctype, &
        twin_experiment, dim_obs_max, use_global_obs, mesh_fesom, &
-       offset_glob, dim_fields_glob, nfields, id, &
+       offset_glob, dim_fields_glob, nfields, id, nlmax, &
        phymin, phymax, bgcmin, bgcmax, &
        path_atm_cov, this_is_pdaf_restart, timemean, &
        ! Debugging:
@@ -291,44 +291,57 @@ disturb_mslp=.true.
   id% temp   =  5 ! temperature
   id% salt   =  6 ! salinity
   id% a_ice  =  7 ! sea-ice concentration
-  id% MLD1   =  8 ! mixed layer depth (criterion after Large et al., 1997)
-  id% PhyChl =  9 ! chlorophyll-a small phytoplankton
-  id% DiaChl = 10 ! chlorophyll-a diatoms
-  id% DIC    = 11
-  id% DOC    = 12
-  id% Alk    = 13
-  id% DIN    = 14
-  id% DON    = 15
-  id% O2     = 16
-  id% pCO2s  = 17
-  id% CO2f   = 18
-  id% PhyN   = 19
-  id% PhyC   = 20
-  id% DiaN   = 21
-  id% DiaC   = 22
-  id% DiaSi  = 23
-  id% PAR    = 24
-  id% NPPn   = 25
-  id% NPPd   = 26
-!~   id% TChl   = 27
-!~   id% TDN    = 28
-  id% Zo1C   = 27
-  id% DetC   = 28
-!~   id% TOC    = 31
-  id% PhyCalc= 29
-  id% export = 30
-  id% alphaCO2  = 31
-  id% PistonVel = 32
-  id% Zo1N   = 33
-  id% Zo2C   = 34
-  id% Zo2N   = 35
+  id% MLD1   =  8 ! boundary layer depth (criterion after Large et al., 1997)
+  id% MLD2   =  9 ! mixed layer depth (density treshold)
   
-  nfields = 35
+  id% PhyChl = 10 ! chlorophyll-a small phytoplankton
+  id% DiaChl = 11 ! chlorophyll-a diatoms
+  
+  id% DIC    = 12 ! dissolved tracers
+  id% DOC    = 13
+  id% Alk    = 14
+  id% DIN    = 15
+  id% DON    = 16
+  id% O2     = 17
+  
+  id% pCO2s     = 18 ! surface carbon diags
+  id% CO2f      = 19
+  id% alphaCO2  = 20
+  id% PistonVel = 21
+    
+  id% PhyN   = 22 ! small phyto
+  id% PhyC   = 23
+  id% PhyCalc= 24
+  
+  id% DiaN   = 25 ! diatoms
+  id% DiaC   = 26
+  id% DiaSi  = 27
+  
+  id% Zo1N   = 28 ! zooplankton
+  id% Zo2C   = 29
+  id% Zo2N   = 30
+  id% Zo1C   = 31
+  
+  id% DetC      = 32 ! detritus
+  id% DetCalc   = 33
+  id% DetSi     = 34
+  id% DetN      = 35
+  id% Det2C     = 36
+  id% Det2Calc  = 37
+  id% Det2Si    = 38
+  id% Det2N     = 39
+
+  id% PAR    = 40 ! diags
+  id% NPPn   = 41
+  id% NPPd   = 42
+  id% export = 43
+  
+  nfields = 43
 
   phymin = 1
-  phymax = 8
+  phymax = 9
   
-  bgcmin = 9
+  bgcmin = 10
   bgcmax = nfields
   
   CALL init_sfields()
@@ -364,20 +377,21 @@ disturb_mslp=.true.
 !  mesh_fesom%nl-1:  Maximum number of fesom layers (1 is surface layer, 0-5m)
 
   ALLOCATE(dim_fields(nfields))
-  dim_fields(id% ssh   )   = myDim_nod2D                     ! 1 SSH
-  dim_fields(id% u     )   = myDim_nod2D*(mesh_fesom%nl-1)   ! 2 u (interpolated on nodes)
-  dim_fields(id% v     )   = myDim_nod2D*(mesh_fesom%nl-1)   ! 3 v (interpolated on nodes)
-  dim_fields(id% w     )   = myDim_nod2D* mesh_fesom%nl      ! 4 w
-  dim_fields(id% temp  )   = myDim_nod2D*(mesh_fesom%nl-1)   ! 5 temp
-  dim_fields(id% salt  )   = myDim_nod2D*(mesh_fesom%nl-1)   ! 6 salt
-  dim_fields(id% a_ice )   = myDim_nod2D                     ! 7 a_ice
+  dim_fields(id% ssh   )   = myDim_nod2D           ! 1 SSH
+  dim_fields(id% u     )   = myDim_nod2D*(nlmax)   ! 2 u (interpolated on nodes)
+  dim_fields(id% v     )   = myDim_nod2D*(nlmax)   ! 3 v (interpolated on nodes)
+  dim_fields(id% w     )   = myDim_nod2D*(nlmax)   ! 4 w
+  dim_fields(id% temp  )   = myDim_nod2D*(nlmax)   ! 5 temp
+  dim_fields(id% salt  )   = myDim_nod2D*(nlmax)   ! 6 salt
+  dim_fields(id% a_ice )   = myDim_nod2D           ! 7 a_ice
   dim_fields(id% MLD1  )   = myDim_nod2D
+  dim_fields(id% MLD2  )   = myDim_nod2D
   
   ! dim_fields biogeochemistry:
   do b=bgcmin,bgcmax
     ! 3D fields:
     if     (sfields(b)% ndims == 2) then
-      dim_fields(b) = myDim_nod2D*(mesh_fesom%nl-1)
+      dim_fields(b) = myDim_nod2D*(nlmax)
     ! surface fields:
     elseif (sfields(b)% ndims == 1) then
       dim_fields(b) = myDim_nod2D
@@ -393,6 +407,7 @@ disturb_mslp=.true.
   offset(id% salt  )   = offset(id% salt  -1) + dim_fields(id% salt  -1)  ! 6 salt
   offset(id% a_ice )   = offset(id% a_ice -1) + dim_fields(id% a_ice -1)  ! 7 a_ice
   offset(id% MLD1  )   = offset(id% MLD1  -1) + dim_fields(id% MLD1  -1)
+  offset(id% MLD2  )   = offset(id% MLD2  -1) + dim_fields(id% MLD2  -1)
   
   ! offset biogeochemistry
   do b=bgcmin,bgcmax
@@ -400,24 +415,40 @@ disturb_mslp=.true.
   enddo
   
   dim_state_p = sum(dim_fields)
+  
+!~ ! *** Domain/node-local dimensions ***
+!~     ALLOCATE(dim_fields_l(nfields)) ! Field dimensions for node-local domain; their value is set in init_dim_l_pdaf.
+!~     ALLOCATE(offset_l(nfields))     ! Field offsets for node-local domain; their value is set in init_dim_l_pdaf.
+    
+  if (mype_model==0 .and. task_id==1) then
+  do b=1,nfields
+      WRITE (*,'(1X,A30,1X,A5,1X,I7,1X,I7)') 'PE0-dim and offset of field ', &
+                                              trim(sfields(b)%variable), &
+                                              dim_fields(b), &
+                                              offset(b)
+  enddo
+  endif
 
+! *******************************************************
 ! *** Specify offset of fields in global state vector ***
+! *******************************************************
 
 	ALLOCATE(dim_fields_glob(nfields))
-	dim_fields_glob(id% ssh   ) = mesh_fesom%nod2D                        ! SSH
-	dim_fields_glob(id% u     ) = mesh_fesom%nod2D * (mesh_fesom%nl-1)    ! u (interpolated on nodes)
-	dim_fields_glob(id% v     ) = mesh_fesom%nod2D * (mesh_fesom%nl-1)    ! v (interpolated on nodes)
-	dim_fields_glob(id% w     ) = mesh_fesom%nod2D * mesh_fesom%nl        ! w
-	dim_fields_glob(id% temp  ) = mesh_fesom%nod2D * (mesh_fesom%nl-1)    ! temp
-	dim_fields_glob(id% salt  ) = mesh_fesom%nod2D * (mesh_fesom%nl-1)    ! salt
-	dim_fields_glob(id% a_ice ) = mesh_fesom%nod2D                        ! a_ice
+	dim_fields_glob(id% ssh   ) = mesh_fesom%nod2D              ! SSH
+	dim_fields_glob(id% u     ) = mesh_fesom%nod2D * (nlmax)    ! u (interpolated on nodes)
+	dim_fields_glob(id% v     ) = mesh_fesom%nod2D * (nlmax)    ! v (interpolated on nodes)
+	dim_fields_glob(id% w     ) = mesh_fesom%nod2D * (nlmax)    ! w
+	dim_fields_glob(id% temp  ) = mesh_fesom%nod2D * (nlmax)    ! temp
+	dim_fields_glob(id% salt  ) = mesh_fesom%nod2D * (nlmax)    ! salt
+	dim_fields_glob(id% a_ice ) = mesh_fesom%nod2D              ! a_ice
 	dim_fields_glob(id% MLD1  ) = mesh_fesom%nod2D
+	dim_fields_glob(id% MLD2  ) = mesh_fesom%nod2D
 	
 	! dim_fields biogeochemistry:
     do b=bgcmin,bgcmax
       ! 3D fields:
       if     (sfields(b)% ndims == 2) then
-        dim_fields_glob(b) = mesh_fesom%nod2D * (mesh_fesom%nl-1)
+        dim_fields_glob(b) = mesh_fesom%nod2D * (nlmax)
       ! surface fields:
       elseif (sfields(b)% ndims == 1) then
         dim_fields_glob(b) = mesh_fesom%nod2D
@@ -433,6 +464,7 @@ disturb_mslp=.true.
 	offset_glob(id% salt  ) = offset_glob(id% salt  -1) + dim_fields_glob(id% salt  -1)         ! salt
 	offset_glob(id% a_ice ) = offset_glob(id% a_ice -1) + dim_fields_glob(id% a_ice -1)         ! a_ice
 	offset_glob(id% MLD1  ) = offset_glob(id% MLD1  -1) + dim_fields_glob(id% MLD1  -1)
+	offset_glob(id% MLD2  ) = offset_glob(id% MLD2  -1) + dim_fields_glob(id% MLD2  -1)
 	
 	! offset_glob biogeochemistry
     do b=bgcmin,bgcmax
@@ -446,6 +478,7 @@ disturb_mslp=.true.
       WRITE(*,*) 'init_pdaf - myDim_elem2D:      ', myDim_elem2D
 	  WRITE(*,*) 'init_pdaf - mesh_fesom%elem2D: ', mesh_fesom%elem2D
 	  WRITE(*,*) 'init_pdaf - mesh_fesom%nl:     ', mesh_fesom%nl
+	  WRITE(*,*) 'init_pdaf - nlmax:             ', nlmax
 	  WRITE(*,*) 'init_pdaf - dim_state:         ', dim_state
 	  WRITE(*,*) 'init_pdaf - dim_state_p:       ', dim_state_p
   endif

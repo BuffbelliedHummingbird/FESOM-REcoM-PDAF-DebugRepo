@@ -20,11 +20,13 @@ SUBROUTINE init_dim_l_pdaf(step, domain_p, dim_l)
 
   USE mod_assim_pdaf, &                    ! Variables for assimilation
        ONLY: id_lstate_in_pstate, &        ! Indices of local state vector in PE-local global state vector
-             offset, &                     ! PE-local offsets of fields in state vector
+             offset, nlmax, &               ! PE-local offsets of fields in state vector
              id, &                         ! Field IDs in state vector
              coords_l, &                   ! Coordinates of local analysis domain
              mesh_fesom, &                 
-             nfields, bgcmin, bgcmax
+             nfields, bgcmin, bgcmax, &
+             phymin, phymax, &
+             debug_id_nod2
                                           ! mesh_fesom % coord_nod2D, & ! vertex coordinates in radian measure
                                           ! mesh_fesom % nlevels, &     ! number of levels at (below) elem     considering bottom topography
                                           ! mesh_fesom % nlevels_nod2D  ! number of levels at (below) vertices considering bottom topography
@@ -32,22 +34,19 @@ SUBROUTINE init_dim_l_pdaf(step, domain_p, dim_l)
     USE PDAFomi, &
         ONLY: PDAFomi_set_debug_flag
     USE mod_parallel_pdaf, &
-        ONLY: mype_filter
+        ONLY: mype_filter, abort_parallel
     USE PDAF_mod_filter, &
         ONLY: state
     USE mod_nc_out_variables, &
         ONLY: sfields
-       
-  USE g_rotate_grid, &
-       ONLY: r2g                           ! Transform from the mesh (rotated) coordinates 
-                                           ! to geographical coordinates  
+    USE g_rotate_grid, &
+        ONLY: r2g                           ! Transform from the mesh (rotated) coordinates 
+                                            ! to geographical coordinates  
        ! glon, glat        :: [radian] geographical coordinates
        ! rlon, rlat        :: [radian] mesh (rotated) coordinates
-       
-  USE mod_assim_pdaf, &
-       ONLY: debug_id_nod2
   USE g_parsup, &
        ONLY: myList_nod2D
+       
 
   IMPLICIT NONE
 
@@ -60,7 +59,7 @@ SUBROUTINE init_dim_l_pdaf(step, domain_p, dim_l)
   INTEGER :: nlay                              ! Number of layers for current domain
   INTEGER :: dim_fields_l(nfields)             ! Field dimensions for current domain
   INTEGER :: offset_l(nfields)                 ! Field offsets for current domain
-  INTEGER :: i, b                              ! Counters
+  INTEGER :: i, b, p                           ! Counters
   
   ! integer :: myDebug_id(1)
   ! myDebug_id = FINDLOC(myList_nod2D, value=debug_id_nod2)
@@ -73,15 +72,34 @@ SUBROUTINE init_dim_l_pdaf(step, domain_p, dim_l)
   
   nlay = mesh_fesom%nlevels_nod2D(domain_p)-1
   
-  dim_fields_l (id%SSH)    = 1
-  dim_fields_l (id%u)      = nlay
-  dim_fields_l (id%v)      = nlay
-  dim_fields_l (id%w)      = 0 ! nlay
-  dim_fields_l (id%temp)   = nlay
-  dim_fields_l (id%salt)   = nlay
-  dim_fields_l (id%a_ice)  = 0
-  dim_fields_l (id%MLD1)   = 0
+  IF (nlay > nlmax) THEN
+  WRITE(*,*) 'FESOM-PDAF ', 'init_dim_l_pdaf ', 'domain_p ', domain_p, ' nlay exceeds layer bounds!'
+  CALL abort_parallel()
+  ENDIF
+  
+!~   dim_fields_l (id%SSH)    = 1
+!~   dim_fields_l (id%u)      = nlay
+!~   dim_fields_l (id%v)      = nlay
+!~   dim_fields_l (id%w)      = 0 ! nlay
+!~   dim_fields_l (id%temp)   = nlay
+!~   dim_fields_l (id%salt)   = nlay
+!~   dim_fields_l (id%a_ice)  = 0
+!~   dim_fields_l (id%MLD1)   = 0
+  
+  ! Physics:
+  DO p=phymin, phymax
+    ! not updated:
+    IF ( .not. (sfields(p)% updated)) THEN
+      dim_fields_l(p) = 0
+    ELSE
+      ! surface fields:
+      IF (sfields(p)% ndims == 1)   dim_fields_l(p)=1
+      ! 3D fields:
+      IF (sfields(p)% ndims == 2)   dim_fields_l(p)=nlay
+    ENDIF
+  ENDDO
 
+  ! BGC:
   DO b=bgcmin, bgcmax
     ! not updated:
     IF ( .not. (sfields(b)% updated)) THEN
@@ -134,34 +152,69 @@ SUBROUTINE init_dim_l_pdaf(step, domain_p, dim_l)
   ! *** indices for full state vector ***
 
   ! SSH
+  if (sfields(id%ssh)%updated) then
   id_lstate_in_pstate (offset_l(id%ssh)+1) &
         = offset(id%ssh) + domain_p
+  endif
+  
   ! U
+  if (sfields(id%u)%updated) then
   id_lstate_in_pstate (offset_l(id%u)+1 : offset_l(id%u)+dim_fields_l(id%u)) &
         = offset(id%u) &
-        + (domain_p-1)*(mesh_fesom%nl-1) &
+        + (domain_p-1)*(nlmax) &
         + (/(i, i=1,dim_fields_l(id%u))/)
+  endif
+  
   ! V
+  if (sfields(id%v)%updated) then
   id_lstate_in_pstate (offset_l(id%v)+1 : offset_l(id%v)+dim_fields_l(id%v)) &
         = offset(id%v) &
-        + (domain_p-1)*(mesh_fesom%nl-1) &
+        + (domain_p-1)*(nlmax) &
         + (/(i, i=1,dim_fields_l(id%v))/)
+  endif
         
   ! W
   ! id_lstate_in_pstate (offset_l(id%w)+1 : offset_l(id%w+1)) &
   !      = offset(id%w) &
-  !      + (domain_p-1)*(mesh_fesom%nl) &
+  !      + (domain_p-1)*(nlmax) &
   !      + (/(i, i=1,dim_fields_l(id%w))/)
   
   ! Temp
+  if (sfields(id%temp)%updated) then
   id_lstate_in_pstate (offset_l(id%temp)+1 : offset_l(id%temp)+dim_fields_l(id%temp))&
          = offset(id%temp) &
-         + (domain_p-1)*(mesh_fesom%nl-1) &
+         + (domain_p-1)*(nlmax) &
          + (/(i, i=1,dim_fields_l(id%temp))/)
+  endif
+  
   ! Salt
+  if (sfields(id%salt)%updated) then
   id_lstate_in_pstate (offset_l(id%salt)+1 : offset_l(id%salt)+dim_fields_l(id%salt)) &
         = offset(id%salt) &
-        + (domain_p-1)*(mesh_fesom%nl-1) &
+        + (domain_p-1)*(nlmax) &
         + (/(i, i=1,dim_fields_l(id%salt))/)
+  endif
+        
+  ! BGC:
+  DO b=bgcmin, bgcmax
+  
+    ! only updated fields:
+    IF ((sfields(b)% updated)) THEN
+      
+      ! surface fields:
+      IF (sfields(b)% ndims == 1)   THEN
+            id_lstate_in_pstate (offset_l(b)+1) &
+                   = offset(b) + domain_p
+      ENDIF
+
+      ! 3D fields:
+      IF (sfields(b)% ndims == 2)   THEN
+            id_lstate_in_pstate (offset_l(b)+1 : offset_l(b)+dim_fields_l(b))&
+                   = offset(b) &
+                   + (domain_p-1)*(nlmax) &
+                   + (/(i, i=1,dim_fields_l(b))/)
+      ENDIF
+    ENDIF
+  ENDDO
 
 END SUBROUTINE init_dim_l_pdaf

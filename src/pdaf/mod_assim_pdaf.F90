@@ -115,8 +115,9 @@ INTEGER :: istep_asml             ! Time step at end of an forecast phase
 LOGICAL :: flag_final=.false.     ! Whether the current is the final analysis step
 
 ! Declare Fortran type holding the indices of model fields in the state vector
+! Declare Fortran type holding the indices of model fields in the state vector
 TYPE field_ids
-   INTEGER :: ssh
+   INTEGER :: ssh        ! physics
    INTEGER :: u 
    INTEGER :: v 
    INTEGER :: w 
@@ -124,36 +125,44 @@ TYPE field_ids
    INTEGER :: salt
    INTEGER :: a_ice
    INTEGER :: MLD1
-   INTEGER :: PhyChl
+   INTEGER :: MLD2
+   INTEGER :: PhyChl     ! chlorophyll
    INTEGER :: DiaChl
-   INTEGER :: DIC
+   INTEGER :: DIC        ! dissolved tracers
    INTEGER :: DOC
    INTEGER :: Alk
    INTEGER :: DIN
    INTEGER :: DON
    INTEGER :: O2
-   INTEGER :: pCO2s
+   INTEGER :: pCO2s      ! surface carbon diagnostics
    INTEGER :: CO2f
-   INTEGER :: PhyN
+   INTEGER :: alphaCO2
+   INTEGER :: PistonVel
+   INTEGER :: PhyN       ! small phyto
    INTEGER :: PhyC
-   INTEGER :: DiaN
+   INTEGER :: PhyCalc
+   INTEGER :: DiaN       ! diatoms
    INTEGER :: DiaC
    INTEGER :: DiaSi
-   INTEGER :: PAR
-   INTEGER :: NPPn
-   INTEGER :: NPPd
-   !   INTEGER :: TChl   ! Total chlorophyll = PhyChl + DiaChl
-   !   INTEGER :: TDN    ! Total dissolved N = DIN + DON
-   INTEGER :: Zo1C
+   INTEGER :: Zo1C       ! zooplankton
    INTEGER :: Zo1N
    INTEGER :: Zo2C
    INTEGER :: Zo2N
-   INTEGER :: DetC
-   !   INTEGER :: TOC    ! Total organic carbon: PhyC + DiaC + DetC + DOC + HetC
-   INTEGER :: PhyCalc
+   INTEGER :: DetC       ! detritus
+   INTEGER :: DetCalc
+   INTEGER :: DetSi
+   INTEGER :: DetN
+   INTEGER :: Det2C
+   INTEGER :: Det2Calc
+   INTEGER :: Det2Si
+   INTEGER :: Det2N
+   INTEGER :: PAR        ! diags
+   INTEGER :: NPPn
+   INTEGER :: NPPd
    INTEGER :: export
-   INTEGER :: alphaCO2
-   INTEGER :: PistonVel
+   !   INTEGER :: TChl   ! Total chlorophyll = PhyChl + DiaChl
+   !   INTEGER :: TDN    ! Total dissolved N = DIN + DON
+   !   INTEGER :: TOC    ! Total organic carbon: PhyC + DiaC + DetC + DOC + HetC
 END TYPE field_ids
 
 ! Type variable holding field IDs in state vector
@@ -225,6 +234,7 @@ DATA startday_of_month_in_year(0,:) /1, 32, 60, 91, 121, 152, 182, 213, 244, 274
 DATA startday_of_month_in_year(1,:) /1, 32, 61, 92, 122, 153, 183, 214, 245, 275, 306, 336/
 
 type(t_mesh), pointer, save      :: mesh_fesom
+INTEGER :: nlmax = 46 ! CORE2 mesh: deepest wet cells at mesh_fesom%nl-2
 
 ! For debugging:
 INTEGER :: debug_id_depth, & ! Location for debugging output

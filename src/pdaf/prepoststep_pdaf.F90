@@ -26,7 +26,7 @@ SUBROUTINE prepoststep_pdaf(step, dim_p, dim_ens, dim_ens_p, dim_obs_p, &
        monthly_state_f, monthly_state_a, write_monthly_mean,mon_snapshot_mem, &
        num_day_in_month, endday_of_month_in_year, startday_of_month_in_year, &
        depth_excl, depth_excl_no, this_is_pdaf_restart, mesh_fesom, &
-       dim_fields, dim_fields_glob, offset, offset_glob, nfields, id, &
+       dim_fields, dim_fields_glob, offset, offset_glob, nfields, id, nlmax, &
        timemean, monthly_state_m, delt_obs_ocn, &
        monthly_state_ens_f, monthly_state_ens_a, days_since_DAstart, forget
   USE mod_atmos_ens_stochasticity, &
@@ -294,7 +294,7 @@ SUBROUTINE prepoststep_pdaf(step, dim_p, dim_ens, dim_ens_p, dim_obs_p, &
         IF (ALLOCATED(mean_sst_p)) DEALLOCATE(mean_sst_p)
         ALLOCATE (mean_sst_p(myDim_nod2D))
         DO i = 1, myDim_nod2D
-          mean_sst_p(i) = state_p(offset(id% temp) + (i-1) * (mesh_fesom%nl-1) + 1)
+          mean_sst_p(i) = state_p(offset(id% temp) + (i-1) * (nlmax) + 1)
         END DO
      END IF
      
@@ -303,7 +303,7 @@ SUBROUTINE prepoststep_pdaf(step, dim_p, dim_ens, dim_ens_p, dim_obs_p, &
         IF (ALLOCATED(mean_sss_p)) DEALLOCATE(mean_sss_p)
         ALLOCATE (mean_sss_p(myDim_nod2D))
         DO i = 1, myDim_nod2D
-          mean_sss_p(i) = state_p(offset(id% salt) + (i-1) * (mesh_fesom%nl-1) + 1)
+          mean_sss_p(i) = state_p(offset(id% salt) + (i-1) * (nlmax) + 1)
         END DO
      END IF
 
@@ -312,7 +312,7 @@ SUBROUTINE prepoststep_pdaf(step, dim_p, dim_ens, dim_ens_p, dim_obs_p, &
         IF (ALLOCATED(mean_sss_cci_p)) DEALLOCATE(mean_sss_cci_p)
         ALLOCATE (mean_sss_cci_p(myDim_nod2D))
         DO i = 1, myDim_nod2D
-          mean_sss_cci_p(i) = state_p(offset(id% salt) + (i-1) * (mesh_fesom%nl-1) + 1)
+          mean_sss_cci_p(i) = state_p(offset(id% salt) + (i-1) * (nlmax) + 1)
         END DO
      END IF
 
@@ -374,7 +374,7 @@ SUBROUTINE prepoststep_pdaf(step, dim_p, dim_ens, dim_ens_p, dim_obs_p, &
           'FESOM-PDAF', 'SSH','U','V','W','temp','salt', &
           'FESOM-PDAF', ('-',i=1,66)
      WRITE (*,'(a,10x,  6es14.4, 1x,a5,a1,/a, 10x,66a)') &
-          'FESOM-PDAF', rmse(1), rmse(2), rmse(3), rmse(4), rmse(5), rmse(6), 'RMSe-', typestr,&
+          'FESOM-PDAF', rmse(id%ssh), rmse(id%u), rmse(id%v), rmse(id%w), rmse(id%temp), rmse(id%salt), 'RMSe-', typestr,&
           'FESOM-PDAF', ('-',i=1,66)
   END IF
   

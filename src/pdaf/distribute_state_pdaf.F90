@@ -29,7 +29,7 @@ SUBROUTINE distribute_state_pdaf(dim_p, state_p)
        COMM_model, MPIerr, mype_filter
   USE mod_assim_pdaf, &
        ONLY: offset, loc_radius,this_is_pdaf_restart, mesh_fesom, &
-       dim_fields, id, istep_asml, step_null
+       dim_fields, id, istep_asml, step_null, nlmax
   USE g_PARSUP, &
        ONLY: myDim_nod2D, myDim_elem2D, &
              eDim_nod2D, eDim_elem2D 
@@ -53,7 +53,7 @@ SUBROUTINE distribute_state_pdaf(dim_p, state_p)
 ! Called by: PDAF_get_state   (as U_dist_state)
 
 ! Local variables
-  INTEGER :: i, k         ! Counter
+  INTEGER :: i, k, s      ! Counters
   INTEGER :: node         ! Node index
   
   REAL, ALLOCATABLE :: U_node_upd(:,:,:) ! Velocity update on nodes
@@ -91,15 +91,19 @@ SUBROUTINE distribute_state_pdaf(dim_p, state_p)
      eta_n(i) = state_p(i + offset(id% SSH))
   END DO
   
-  ! u (2) and v (3) velocities
+ ! u (2) and v (3) velocities
   ! 1. calculate update on nodes, i.e. analysis state (state_p) minus not-yet-updated model state (Unode)
   allocate(U_node_upd(2, mesh_fesom%nl-1, myDim_nod2D+eDim_nod2D))
   U_node_upd = 0.0
   
   DO i = 1, myDim_nod2D
-   DO k = 1, mesh_fesom%nl-1
-      U_node_upd(1, k, i) = state_p((i-1) * (mesh_fesom%nl-1) + k + offset(id% u)) - Unode(1, k, i) ! u
-      U_node_upd(2, k, i) = state_p((i-1) * (mesh_fesom%nl-1) + k + offset(id% v)) - Unode(2, k, i) ! v
+   DO k = 1, nlmax
+      ! u
+      s = (i-1) * (nlmax) + k + offset(id% u)
+      U_node_upd(1, k, i) = state_p(s) - Unode(1, k, i)
+      ! v
+      s = (i-1) * (nlmax) + k + offset(id% v)
+      U_node_upd(2, k, i) = state_p(s) - Unode(2, k, i)
    END DO
   END DO
   
@@ -114,7 +118,6 @@ SUBROUTINE distribute_state_pdaf(dim_p, state_p)
   
   ! 4. adjust diagnostic model velocity on nodes (Unode)
   call compute_vel_nodes(mesh_fesom)
-
 
   ! Element-wise version not interpolated onto nodes. Removed in favor of the above:
   ! DO i = 1, myDim_elem2D
@@ -135,9 +138,9 @@ SUBROUTINE distribute_state_pdaf(dim_p, state_p)
   ! Temp (5) and salt (6)
   
   DO i = 1, myDim_nod2D
-   DO k = 1, mesh_fesom%nl-1
-      tr_arr(k, i, 1) = state_p((i-1) * (mesh_fesom%nl-1) + k + offset(id% temp)) ! T
-      tr_arr(k, i, 2) = state_p((i-1) * (mesh_fesom%nl-1) + k + offset(id% salt)) ! S
+   DO k = 1, nlmax
+      tr_arr(k, i, 1) = state_p((i-1) * (nlmax) + k + offset(id% temp)) ! T
+      tr_arr(k, i, 2) = state_p((i-1) * (nlmax) + k + offset(id% salt)) ! S
    END DO
   END DO
   
