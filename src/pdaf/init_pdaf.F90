@@ -62,6 +62,8 @@ SUBROUTINE init_pdaf()
        disturb_prec, disturb_snow, disturb_mslp, &
        init_atmos_ens_stochasticity, init_atmos_stochasticity_output,&
        atmos_stochasticity_ON
+  USE mod_carbon_fluxes_diags, &
+      ONLY: init_carbonfluxes_diags_out
 
   USE mod_obs_f_pdaf, &
        ONLY: get_domain_limits_unstr
@@ -547,6 +549,10 @@ disturb_mslp=.true.
     CALL netCDF_init('mean')
     IF (write_ens) CALL netCDF_init('memb')
   ENDIF
+  
+  ! carbon flux diagnostics
+  CALL init_carbonfluxes_diags_out() ! if no file exists, file is created
+
 
 
 ! ******************************'***

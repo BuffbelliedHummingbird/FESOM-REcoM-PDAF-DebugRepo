@@ -236,6 +236,32 @@ DATA startday_of_month_in_year(1,:) /1, 32, 61, 92, 122, 153, 183, 214, 245, 275
 type(t_mesh), pointer, save      :: mesh_fesom
 INTEGER :: nlmax = 46 ! CORE2 mesh: deepest wet cells at mesh_fesom%nl-2
 
+! For carbon diagnostics:
+! Forecast state
+real, allocatable :: mF_alk               (:,:)
+real, allocatable :: mF_dic               (:,:)
+real, allocatable :: mF_livingmatter      (:,:)
+real, allocatable :: mF_deadmatter        (:,:)
+
+! Analysis state
+real, allocatable :: mA_alk               (:,:)
+real, allocatable :: mA_dic               (:,:)
+real, allocatable :: mA_livingmatter      (:,:)
+real, allocatable :: mA_deadmatter        (:,:)
+
+! Source of mass from assimilation step
+real, allocatable :: s_asml_alk           (:,:)
+real, allocatable :: s_asml_dic           (:,:)
+real, allocatable :: s_asml_livingmatter  (:,:)
+real, allocatable :: s_asml_deadmatter    (:,:)
+
+real, allocatable :: sM_asml_alk           (:,:)
+real, allocatable :: sM_asml_dic           (:,:)
+real, allocatable :: sM_asml_livingmatter  (:,:)
+real, allocatable :: sM_asml_deadmatter    (:,:)
+
+real, allocatable :: factor_massvol        (:,:)
+
 ! For debugging:
 INTEGER :: debug_id_depth, & ! Location for debugging output
            debug_id_nod2           

@@ -107,6 +107,9 @@ type(t_mesh),   save,  target  :: mesh
     call clock_init           ! read the clock file 
     call get_run_steps(nsteps)
     call mesh_setup(mesh)
+#ifdef use_PDAF
+    mesh_fesom => mesh
+#endif
 
     if (mype==0) write(*,*) 'FESOM mesh_setup... complete'
     
@@ -213,7 +216,6 @@ type(t_mesh),   save,  target  :: mesh
 #ifdef use_PDAF
     call timeit(2, 'old')
     call timeit(3, 'new')
-    mesh_fesom => mesh
     call compute_vel_nodes(mesh)
     CALL init_PDAF()
     call timeit(3, 'old')
