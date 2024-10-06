@@ -43,6 +43,7 @@ use cpl_driver
 #ifdef use_PDAF
  use timer, only: timeit, time_tot
  use mod_assim_pdaf, only: mesh_fesom
+ use mod_carbon_fluxes_diags, only: carbonfluxes_diags_output_monthly
 #endif
 
 IMPLICIT NONE
@@ -318,6 +319,7 @@ type(t_mesh),   save,  target  :: mesh
         CALL assimilate_PDAF(mstep)
         CALL timeit(7, 'old')
         t4b = MPI_Wtime()
+        CALL carbonfluxes_diags_output_monthly(mstep)
 #endif
 
         !___prepare output______________________________________________________
