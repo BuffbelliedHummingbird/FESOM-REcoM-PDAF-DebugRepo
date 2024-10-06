@@ -28,7 +28,12 @@ SUBROUTINE prepoststep_pdaf(step, dim_p, dim_ens, dim_ens_p, dim_obs_p, &
        depth_excl, depth_excl_no, this_is_pdaf_restart, mesh_fesom, &
        dim_fields, dim_fields_glob, offset, offset_glob, nfields, id, nlmax, &
        timemean, monthly_state_m, delt_obs_ocn, &
-       monthly_state_ens_f, monthly_state_ens_a, days_since_DAstart, forget
+       monthly_state_ens_f, monthly_state_ens_a, days_since_DAstart, forget, &
+       mF_alk, mF_dic, mF_deadmatter, mF_livingmatter, &
+       mA_alk, mA_dic, mA_deadmatter, mA_livingmatter, &
+       s_asml_alk, s_asml_dic, s_asml_deadmatter, s_asml_livingmatter, &
+       sM_asml_alk, sM_asml_dic, sM_asml_deadmatter, sM_asml_livingmatter, &
+       factor_massvol, DAoutput_path
   USE mod_atmos_ens_stochasticity, &
       ONLY: stable_rmse
   USE g_PARSUP, &
@@ -36,6 +41,7 @@ SUBROUTINE prepoststep_pdaf(step, dim_p, dim_ens, dim_ens_p, dim_obs_p, &
        MPI_INTEGER, MPI_MAX, MPI_MIN, mydim_nod2d, MPI_COMM_FESOM, &
        myList_edge2D, myDim_edge2D, myList_nod2D
   USE o_ARRAYS, ONLY: hnode_new
+  USE g_comm_auto, ONLY: gather_nod
   USE mod_nc_out_routines, &
        ONLY: netCDF_out
   USE mod_nc_out_variables, &
@@ -52,9 +58,16 @@ SUBROUTINE prepoststep_pdaf(step, dim_p, dim_ens, dim_ens_p, dim_obs_p, &
         ONLY: assim_o_sss_cci, sss_cci_exclude_ice, sss_cci_exclude_diff, &
               mean_sss_cci_p
   USE g_clock, &
-        ONLY: dayold, yearold, check_fleapyr,daynew,yearnew
+        ONLY: dayold, yearold, check_fleapyr,daynew,yearnew, &
+        fleapyear, cyearnew, month
   USE mod_assim_pdaf, &
         ONLY: debug_id_nod2
+  USE g_events
+  USE recom_config, &
+        ONLY: SecondsPerDay
+  USE mod_carbon_fluxes_diags, &
+        ONLY: init_carbonfluxes_asmldiags_arrays, check, putvar
+  USE netcdf
 
   IMPLICIT NONE
 
@@ -78,7 +91,7 @@ SUBROUTINE prepoststep_pdaf(step, dim_p, dim_ens, dim_ens_p, dim_obs_p, &
 ! Called by: PDAF_X_update       (as U_prepoststep)
 
 ! *** Local variables ***
-  INTEGER :: i, j,k, member, ed    ! Counters
+  INTEGER :: i, j,k, member, ed, s  ! Counters
   REAL :: invdim_ens                ! Inverse ensemble size
   REAL :: invdim_ensm1              ! Inverse of ensemble size minus 1 
   REAL :: rmse_p(nfields)                ! PE-local ensemble spread
@@ -102,6 +115,13 @@ SUBROUTINE prepoststep_pdaf(step, dim_p, dim_ens, dim_ens_p, dim_obs_p, &
   INTEGER :: myDebug_id(1)
   
   LOGICAL :: debugging_monthlymean = .false.
+  
+  ! for carbon mass conservation diagnostics
+  REAL :: weights
+  REAL, allocatable  :: data3_g(:,:)                 ! Temporary array for global 3D-fields
+  character(len=200) :: filename                     ! Full name of output file
+  integer            :: fileid                       ! nc-file ID for output file
+  character(len=100) :: varname
   
   ! generate the format specifier
   ! fmt = '(a,5x,a,'
@@ -150,6 +170,9 @@ SUBROUTINE prepoststep_pdaf(step, dim_p, dim_ens, dim_ens_p, dim_obs_p, &
   IF (.not. ALLOCATED(count_lim_ssh_p))     ALLOCATE(count_lim_ssh_p    (dim_ens))
   IF (.not. ALLOCATED(count_lim_tempM2_g))  ALLOCATE(count_lim_tempM2_g (dim_ens))
   IF (.not. ALLOCATED(count_lim_tempM2_p))  ALLOCATE(count_lim_tempM2_p (dim_ens))
+  
+  ! allocate carbon flux diagnostics at initial time (never de-allocated)
+  IF (step-step_null==0) CALL init_carbonfluxes_asmldiags_arrays()
 
   ! Initialize numbers
   rmse_p = 0.0
@@ -331,6 +354,148 @@ SUBROUTINE prepoststep_pdaf(step, dim_p, dim_ens, dim_ens_p, dim_obs_p, &
      mean_temp_p = state_p(offset(id%temp)+1 : offset(id%temp)+dim_fields(id%temp))
 
   END IF
+  
+! ****************************
+! *** Carbon diagnostics   ***
+! ****************************
+  
+  ! monthly event
+  now_to_write_monthly = .false.
+  call monthly_event(now_to_write_monthly)
+  
+  ! factor to convert concentration to mass
+  factor_massvol = mesh_fesom%areasvol(:nlmax,:myDim_nod2D) * hnode_new(:nlmax,:myDim_nod2D)
+
+  IF (step<0) THEN
+  ! forecast phase
+  ! get mass of carbon before analysis step
+  
+  IF (mype_filter == 0) &
+      WRITE(*, *) 'FESOM-PDAF', '--- compute carbon diagnostics at forecast'
+  
+    DO i = 1, myDim_nod2D
+      DO k = 1, nlmax
+      s = (i-1) * (nlmax) + k ! index in state vector
+      ! DIC
+      mF_dic(k, i) = state_p(s + offset(id% DIC))
+      ! Alk
+      mF_alk(k, i) = state_p(s + offset(id% Alk))
+      ! Living carbon biomass
+      mF_livingmatter(k, i) =  (state_p(s + offset(id% PhyC)) &
+                              + state_p(s + offset(id% DiaC)) &
+                              + state_p(s + offset(id% Zo1C)) &
+                              + state_p(s + offset(id% Zo2C)) &
+                              + state_p(s + offset(id% PhyCalc)))
+      ! Dead organic carbon
+      mF_deadmatter(k, i)   =  (state_p(s + offset(id% DOC))     &
+                              + state_p(s + offset(id% DetC))    &
+                              + state_p(s + offset(id% DetCalc)) &
+                              + state_p(s + offset(id% Det2C))   &
+                              + state_p(s + offset(id% Det2Calc)))
+      ENDDO ! k=1,nlmax
+    ENDDO ! i=1,my_Dim_nod2D
+    
+    ! convert concentration to mass
+    mF_dic = mF_dic * factor_massvol
+    mF_alk = mF_alk * factor_massvol
+    mF_livingmatter = mF_livingmatter * factor_massvol
+    mF_deadmatter   = mF_deadmatter   * factor_massvol
+
+  ENDIF ! (forecast phase)
+  
+  IF (step>0) THEN
+  ! analysis phase
+  ! get mass of carbon after analysis step
+  
+  IF (mype_filter == 0) &
+      WRITE(*, *) 'FESOM-PDAF', '--- compute carbon diagnostics at analysis'
+  
+     DO i = 1, myDim_nod2D
+      DO k = 1, nlmax
+      s = (i-1) * (nlmax) + k ! index in state vector
+      ! DIC
+      mA_dic(k, i) = state_p(s + offset(id% DIC))
+      ! Alk
+      mA_alk(k, i) = state_p(s + offset(id% Alk))
+      ! Living carbon biomass
+      mA_livingmatter(k, i) =  (state_p(s + offset(id% PhyC)) &
+                              + state_p(s + offset(id% DiaC)) &
+                              + state_p(s + offset(id% Zo1C)) &
+                              + state_p(s + offset(id% Zo2C)) &
+                              + state_p(s + offset(id% PhyCalc)))
+      ! Dead organic carbon
+      mA_deadmatter(k, i)   =  (state_p(s + offset(id% DOC))     &
+                              + state_p(s + offset(id% DetC))    &
+                              + state_p(s + offset(id% DetCalc)) &
+                              + state_p(s + offset(id% Det2C))   &
+                              + state_p(s + offset(id% Det2Calc)))
+      ENDDO ! k=1,nlmax
+    ENDDO ! i=1,my_Dim_nod2D
+    
+    ! convert concentration to mass
+    mA_dic = mA_dic * factor_massvol
+    mA_alk = mA_alk * factor_massvol
+    mA_livingmatter = mA_livingmatter * factor_massvol
+    mA_deadmatter   = mA_deadmatter   * factor_massvol
+    
+    ! mass added during analysis step
+    s_asml_dic = mA_dic - mF_dic
+    s_asml_alk = mA_alk - mF_alk
+    s_asml_livingmatter = mA_livingmatter - mF_livingmatter
+    s_asml_deadmatter   = mA_deadmatter   - mA_deadmatter
+    
+    ! compute monthly mean
+    ! add instantenous to monthly
+    sM_asml_dic = sM_asml_dic + s_asml_dic
+    sM_asml_alk = sM_asml_alk + s_asml_alk
+    sM_asml_livingmatter = sM_asml_livingmatter + s_asml_livingmatter
+    sM_asml_deadmatter   = sM_asml_deadmatter   + s_asml_deadmatter
+    
+    IF (now_to_write_monthly) THEN
+    ! compute monthly mean, write output and reset monthly data to zero
+    weights = 1.0/REAL(num_day_in_month(fleapyear,month))/SecondsPerDay
+    
+    sM_asml_dic = sM_asml_dic * weights
+    sM_asml_alk = sM_asml_alk * weights
+    sM_asml_livingmatter = sM_asml_livingmatter * weights
+    sM_asml_deadmatter   = sM_asml_deadmatter   * weights
+    
+    ! write output
+    filename = TRIM(DAoutput_path)//'fesom-recom-pdaf.cfx.'//cyearnew//'.nc'
+    ! print screen information:
+    IF (writepe) THEN
+       WRITE (*, '(a, 8x, a, i9, a, a)') 'FESOM-PDAF', 'Write carbon mass conservation diagnostics at analysis step to NetCDF at for month ', &
+       month, ' to file ', TRIM(filename)
+       ! open file
+       call check( nf90_open(TRIM(filename), nf90_write, fileid))
+    ENDIF ! writepe
+    ! gather and write global ocean fields
+    allocate(data3_g(nlmax,mesh_fesom% nod2D))
+    ! DIC
+    varname =       's_asml_dic'            
+    CALL gather_nod(sM_asml_dic, data3_g)
+    IF (writepe) call putvar(fileid,varname,data3_g,month)
+    ! Alk
+    varname =       's_asml_alk'            
+    CALL gather_nod(sM_asml_alk, data3_g)
+    IF (writepe) call putvar(fileid,varname,data3_g,month)
+    ! Living carbon biomass
+    varname =       's_asml_livingmatter'            
+    CALL gather_nod(sM_asml_livingmatter, data3_g)
+    IF (writepe) call putvar(fileid,varname,data3_g,month)
+    ! Dead organic carbon
+    varname =       's_asml_deadmatter'            
+    CALL gather_nod(sM_asml_deadmatter, data3_g)
+    IF (writepe) call putvar(fileid,varname,data3_g,month)
+    ! close file:
+    deallocate(data3_g)
+    IF (writepe) call check (nf90_close(fileid))
+    
+    ! reset to zero
+    sM_asml_dic = 0.0
+    ENDIF ! now_to_write_monthly
+  
+  ENDIF ! (analysis phase)
 
 
 ! *****************************************************************
