@@ -20,6 +20,11 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
     use i_therm_param
     use g_comm
     use g_support
+#ifdef use_PDAF
+    use mod_carbon_fluxes_diags
+    use mod_assim_pdaf, only: nlmax
+    use mod_parallel_pdaf, only: writepe
+#endif
 
 
     implicit none
@@ -1721,6 +1726,146 @@ subroutine REcoM_sms(n,Nn,state,thick,recipthick,SurfSR,sms,Temp,SinkVel,zF,PAR,
         + KOchl_dia  &
         ) * recipbiostep
         
+!-------------------------------------------------------------------------------
+! Diagnostics: Carbon fluxes
+
+#ifdef use_PDAF
+  if (k<=nlmax) then
+! ***************
+! *** s_bio_dic
+! ***************
+! flux from dead organic carbon to DIC [mmol m-3 s-1]
+! positive: flux is source of DIC
+
+
+    s_bio_dicLoc(k) =  (0.0 &
+      + rho_C1 * arrFunc * EOC           & ! Remineralization [DOC --> DIC]
+      + calc_diss  * DetCalc             & ! Calcite dissolution sinking [Det    Calc --> DIC]
+      + calc_diss2 * DetZ2Calc           & !  """                        [DetZo2 Calc --> DIC]
+      ) * dt_b
+      
+
+! ************************
+! *** s_bio_livingmatter
+! ************************
+! net flux from DIC to living carbon biomass [mmol m-3 s-1]
+! positive: flux is net source of living carbon biomass
+
+    s_bio_livingmatterLoc(k) =  (0.0 &
+      + calcification              & ! [DIC --> PhyCalc]
+      + Cphot            * PhyC    & ! Photosynthesis [DIC --> PhyC]
+      + Cphot_dia        * DiaC    & !  """           [DIC --> DiaC]
+      - phyRespRate      * PhyC    & ! Respiration [PhyC --> DIC]
+      - phyRespRate_dia  * DiaC    & !  """        [DiaC --> DIC]
+      - hetRespFlux                & !  """        [HetC --> DIC]
+      - Zoo2RespFlux               & !  """        [Zo2C --> DIC]
+      - calc_loss_gra   * calc_diss_guts & ! Indegistible for Het and dissolves in guts  [PhyCalc --> DIC]
+      - calc_loss_gra2  * calc_diss_guts & !  """             Zo2  """                   [PhyCalc --> DIC]
+      ) * dt_b
+
+! **********************
+! *** s_bio_deadmatter
+! **********************
+! net flux from living biomass to dead organic carbon [mmol m-3 s-1]
+! positive: flux is net source of dead organic carbon
+
+    s_bio_deadmatterLoc(k) =  (0.0 &
+      + aggregationRate * PhyC                           & ! Aggregation [PhyC --> DetC]
+      + aggregationRate * DiaC                           & !  """        [DiaC --> DetC]
+      + lossC   * limitFacN     * PhyC                   & ! Excretion of DOC [PhyC --> DOC]
+      + lossC_d * limitFacN_dia * DiaC                   & !  """             [DiaC --> DOC]
+      + lossC_z                 * HetC                   & !  """             [HetC --> DOC]
+      + lossC_z2                * Zoo2C                  & !  """             [Zo2C --> DOC]
+      + grazingFlux_phy  * recipQuota     * (1-grazEff)  & ! Sloppy feeding by het [PhyC --> DetC]
+      + GrazingFlux_Dia  * recipQuota_Dia * (1-grazEff)  & !  """                  [DiaC --> DetC]
+      + grazingFlux_phy2 * recipQuota     * (1-grazEff2) & !  """           by zo2 [PhyC --> DetC]
+      + grazingFlux_Dia2 * recipQuota_Dia * (1-grazEff2) & !  """                  [DiaC --> DetC]
+      + grazingFlux_het2 * recipQZoo      * (1-grazEff2) & !  """                  [HetC --> DetC]
+      + calc_loss_gra  * (1-calc_diss_guts)              & ! Indigestible for het and excreted [PhyCalc --> Det   Calc]
+      + calc_loss_gra2 * (1-calc_diss_guts)              & !  """         for zo2 and excreted [PhyCalc --> DetZ2 Calc]
+      + hetLossFlux  * recipQZoo                         & ! Mortality [HetC --> DetC]
+      + Zoo2LossFlux * recipQZoo2                        & !  """      [Zo2C --> DetC]
+      + Zoo2fecalloss_c                                  & ! Faeces    [Zo2C --> DetC]
+
+      + lossC * limitFacN * phyCalc                      & ! [PhyCalc --> DetCalc]  (excretion) 
+      + phyRespRate       * phyCalc                      & !  """                   (respiration)
+      + calc_loss_agg                                    & !  """                   (aggregation)
+
+      - grazingFlux_Det    * recipDet  * grazEff         & ! Grazing on detritus [Det   C --> HetC]
+      - grazingFlux_DetZ2  * recipDet2 * grazEff         & !  """                [DetZ2 C --> HetC]
+      - grazingFlux_Det2   * recipDet  * grazEff2        & !  """                [Det   C --> Zo2C]
+      - grazingFlux_DetZ22 * recipDet2 * grazEff2        & !  """                [DetZ2 C --> Zo2C]
+      ) * dt_b
+      
+  ! note:
+  ! pool-internal fluxes are not written
+  ! for living carbon (grazing):
+  !   grazingFlux_phy2 * recipQuota * grazEff2     & ! [ PhyC   --> Zo2C  ]
+  !   grazingFlux_Dia2 * recipQuota_Dia * grazEff2 & ! [ DiaC   --> Zo2C  ]
+  !   grazingFlux_het2 * recipQZoo * grazEff2      & ! [ HetC   --> Zo2C  ]
+  !   grazingFlux_phy * recipQuota * grazEff       & ! [ PhyC  --> HetC ]
+  !   grazingFlux_Dia * recipQuota_Dia * grazEff   & ! [ DiaC  --> HetC ]
+  ! for dead organic carbon (remin):
+  !   reminC * arrFunc * DetC    &  ! [ Det  C --> DOC ]
+  !   reminC * arrFunc * DetZ2C  &  ! [ Det2 C --> DOC ]
+
+      
+  ! **************************
+  ! bug-check: output be zero.
+  ! **************************
+  IF (cfdiags_debug .or. (daynew<=1)) THEN
+     if (writepe .and. (n==1)) THEN
+     
+      ! source of DIC
+      write(*,*) 's_DIC ', &
+         (s_bio_dicLoc(k) - s_bio_livingmatterLoc(k)) &
+       - sms(k,idic)
+      
+      ! source of living organic carbon
+      write(*,*) 's_liv ', &
+         (s_bio_livingmatterLoc(k) - s_bio_deadmatterLoc(k)) &
+       - (   sms(k,iphyc)   &
+           + sms(k,ihetc)   &
+           + sms(k,izoo2c)  &
+           + sms(k,idiac)   &
+           + sms(k,iphycal) &
+         )
+         
+      ! source of dead organic carbon
+      write(*,*) 's_dead ', &
+         (s_bio_deadmatterLoc(k) - s_bio_dicLoc(k)) &
+       - (   sms(k,idetc)      &
+           + sms(k,idetz2c)    &
+           + sms(k,idetz2calc) &
+           + sms(k,idoc)       &
+           + sms(k,idetcal)    &
+         )
+         
+      write(*,*) 'sum_sms ', &
+             sms(k,idic) &
+           + sms(k,iphyc)   &
+           + sms(k,ihetc)   &
+           + sms(k,izoo2c)  &
+           + sms(k,idiac)   &
+           + sms(k,iphycal) &
+           + sms(k,idetc)      &
+           + sms(k,idetz2c)    &
+           + sms(k,idetz2calc) &
+           + sms(k,idoc)       &
+           + sms(k,idetcal)
+     endif
+  ENDIF
+
+! ***************
+! *** s_bio_alk
+! ***************
+! net source of alkalinity through biogeochemical processes [mmol m-3 s-1]
+! (calcification, calcite dissolution of detritus in water column and in guts, assimilation and remineralization of nitrogen)
+
+    s_bio_alkLoc(k) =  sms(k,ialk)
+
+  endif ! (k<=nlmax)
+#endif
 
   end do ! Main vertikal loop ends
 
